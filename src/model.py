@@ -25,7 +25,7 @@ class Basic3DCNN(nn.Module):
         self.fc2 = nn.Linear(128, num_classes)
         
         # Dropout pour éviter le surapprentissage
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(0.3)
     
     def _get_fc_input_size(self):
         """

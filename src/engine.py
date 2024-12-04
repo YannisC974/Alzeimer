@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score
 from model import Basic3DCNN
+from tqdm import tqdm
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device):
     """
@@ -21,10 +22,12 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     running_loss = 0.0
     all_labels = []
     all_preds = []
+
+    progress_bar = tqdm(dataloader, desc='Training', leave=False)
     
     # Boucle sur les lots de données
-    for inputs, masks, labels in dataloader:
-        inputs, masks, labels = inputs.to(device), masks.to(device), labels.to(device)
+    for batch_idx, (inputs, masks, labels) in enumerate(progress_bar):
+        inputs, masks, labels = inputs.to(device, non_blocking=True), masks.to(device, non_blocking=True), labels.to(device, non_blocking=True)
         
         optimizer.zero_grad()
     
@@ -41,6 +44,10 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
         
         all_labels.extend(labels.cpu().numpy())
         all_preds.extend(preds.cpu().numpy())
+
+        progress_bar.set_postfix({
+            'loss': f'{loss.item():.4f}'
+        })
     
     avg_loss = running_loss / len(dataloader)
     accuracy = accuracy_score(all_labels, all_preds)
@@ -65,7 +72,7 @@ def validate(model, dataloader, criterion, device):
     
     with torch.no_grad():  
         for inputs, masks, labels in dataloader:
-            inputs, masks, labels = inputs.to(device), masks, labels.to(device)
+            inputs, masks, labels = inputs.to(device, non_blocking=True), masks.to(device, non_blocking=True), labels.to(device, non_blocking=True)
             
             outputs = model(inputs)
             
