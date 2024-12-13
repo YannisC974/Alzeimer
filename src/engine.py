@@ -17,7 +17,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     :param device: Appareil (GPU ou CPU) sur lequel entraîner le modèle.
     :return: La perte moyenne et la précision de cette époque.
     """
-    model.train()  # Met le modèle en mode entraînement
+    model.train()  
     
     running_loss = 0.0
     all_labels = []
@@ -25,7 +25,6 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
 
     progress_bar = tqdm(dataloader, desc='Training', leave=False)
     
-    # Boucle sur les lots de données
     for batch_idx, (inputs, masks, labels) in enumerate(progress_bar):
         inputs, masks, labels = inputs.to(device, non_blocking=True), masks.to(device, non_blocking=True), labels.to(device, non_blocking=True)
         
