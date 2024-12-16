@@ -7,12 +7,13 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Subset
 from sklearn.metrics import accuracy_score
 from engine import train_one_epoch, validate, train_one_epoch_mixup, validate_mixup
-from dataset import HippocampusDataset3D, TestHippocampusDataset3D, MixupAugmentedDataset
+from dataset import HippocampusDataset3D, TestHippocampusDataset3D, MixupAugmentedDataset, HDF5Dataset
 import matplotlib.pyplot as plt
 import numpy as np
 from utils import EarlyStopping
 import os
 import optuna
+import h5py
 from datetime import datetime
 from itertools import product
 from model import Basic3DCNN, GradCAM3D
@@ -44,6 +45,17 @@ def main():
     best_val_accuracy = 0
     best_hyperparams = None
 
+    data_dir = "/home/ychappetjuan/Alzeimer/datasets"
+    csv_path = "/home/ychappetjuan/Alzeimer/list_standardized_tongtong_2017.csv"
+    base_dataset = HippocampusDataset3D(data_dir, csv_path)
+    mixup_dataset = MixupAugmentedDataset(base_dataset, augment_factor=5)
+    mixup_dataset.generate_and_save_dataset('mixup_dataset.h5')
+    print("Taille totale du dataset :", len(mixup_dataset))
+    print(mixup_dataset)
+    #labels = [mixup_dataset[i][2] for i in range(len(mixup_dataset))]
+
+    #mixup_dataset.generate_and_save_dataset('mixup_dataset.h5')
+
     for params in param_combinations:
         learning_rate, batch_size, weight_decay, num_epochs = params
 
@@ -65,8 +77,12 @@ def main():
 
         writer = SummaryWriter(log_dir='./logs') 
 
-        dataset = HippocampusDataset3D(data_dir, csv_path)
-        print("Taille totale du dataset :", len(dataset))
+        # mixup_dataset.generate_and_save_dataset('mixup_dataset.h5')
+
+        base_dataset = HippocampusDataset3D(data_dir, csv_path)
+        mixup_dataset = MixupAugmentedDataset(base_dataset, augment_factor=5)
+        mixup_dataset.generate_and_save_dataset('mixup_dataset.h5')
+        print("Taille totale du dataset :", len(base_dataset))
 
         labels = [dataset[i][2] for i in range(len(dataset))]
 
@@ -99,6 +115,8 @@ def main():
 
             train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+
 
             early_stopping = EarlyStopping(
                 patience=5,
@@ -154,15 +172,14 @@ def main_mixup():
 
     best_val_accuracy = 0
     best_hyperparams = None
+    label_map = {0.0: 0, 0.1: 1, 0.2: 2, 0.3: 3, 0.4: 4, 0.5: 5, 0.6: 6, 0.7: 7, 0.8: 8, 0.9: 9, 1.0: 10}
 
     for params in param_combinations:
         learning_rate, batch_size, weight_decay, num_epochs = params
 
         # Paramètres
         input_channels = 1
-        num_classes = 2
-        # data_dir = "/home/ychappetjuan/Alzeimer/datasets"
-        # csv_path = "/home/ychappetjuan/Alzeimer/list_standardized_tongtong_2017.csv"
+        num_classes = 11
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         # Reproductibilité
@@ -170,16 +187,26 @@ def main_mixup():
         torch.cuda.manual_seed(42)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+
+        # Définition du modèle
         model = Basic3DCNN(input_channels=input_channels, num_classes=num_classes).to(device)
         criterion = torch.nn.CrossEntropyLoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
         writer = SummaryWriter(log_dir='./logs_mixup')
 
-        dataset = torch.load('augmented_dataset.pt')
-        print("Taille totale du dataset :", len(dataset))
+        # Dataset
+        h5_path = "/home/ychappetjuan/Alzeimer/mixup_dataset_x5.h5"
 
-        labels = [dataset[i][2] for i in range(len(dataset))]
+        # Charger le dataset
+        dataset = HDF5Dataset(h5_path)
+
+        # Exemple d'accès
+        image, label = dataset[1100]
+        print("Image shape:", image.shape)
+        print("Label:", label)
+
+        labels = [dataset[i][1] for i in range(len(dataset))]
         binned_labels = np.digitize(labels, bins=[0.25, 0.5, 0.75])
 
         run_dir = "/home/ychappetjuan/Alzeimer/models_mixup"
@@ -194,8 +221,7 @@ def main_mixup():
         print(f"Dossier pour le run créé : {unique_run_dir}")
         print(f"Dossier checkpoints créé : {checkpoint_dir}")
 
-        # Lancer 10 entraînements avec des splits différents
-        for i in range(10):  # Répéter l'entraînement 10 fois
+        for i in range(1): 
             print(f"Début de l'entraînement {i + 1}/10")
 
             # Split des indices pour ce run
@@ -203,7 +229,7 @@ def main_mixup():
                 range(len(dataset)),
                 test_size=0.2,
                 stratify=binned_labels,
-                random_state=i  # Utiliser un random_state différent pour chaque itération
+                random_state=i  
             )
 
             train_dataset = Subset(dataset, train_indices)
@@ -213,7 +239,7 @@ def main_mixup():
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
             early_stopping = EarlyStopping(
-                patience=7,
+                patience=5,
                 verbose=True,
                 path=os.path.join(checkpoint_dir, f'best_model_{i}.pth')
             )

@@ -6,6 +6,7 @@ import torch
 import re
 from torch.utils.data import Dataset
 from torchvision.transforms import Compose, Normalize
+import h5py
 
 transform = Compose([
     lambda x: x / 255.0,  
@@ -101,11 +102,12 @@ class HippocampusDataset3D(Dataset):
         return image_tensor, mask_tensor, label_tensor
 
 class MixupAugmentedDataset(Dataset):
-    def __init__(self, base_dataset, augment_factor=5):
+    def __init__(self, base_dataset, augment_factor=5, lam_values=None):
         """
         Dataset pour appliquer la méthode Mixup avec des valeurs discrètes de lambda.
-        :param base_dataset: Instance du dataset original (par exemple `HippocampusDataset3D`).
+        :param base_dataset: Instance du dataset original.
         :param augment_factor: Nombre de fois que chaque donnée est augmentée.
+        :param lam_values: Liste des valeurs de lambda discrètes.
         """
         self.base_dataset = base_dataset
         self.augment_factor = augment_factor
@@ -146,6 +148,45 @@ class MixupAugmentedDataset(Dataset):
             mixed_label = lam * label1 + (1 - lam) * label2
             
             return mixed_image, mask1, mixed_label
+
+    def generate_and_save_dataset(self, output_path):
+        """
+        Génère le dataset avec Mixup et sauvegarde dans un fichier HDF5.
+        :param output_path: Chemin pour sauvegarder le dataset.
+        """
+        base_len = len(self.base_dataset)
+        total_len = len(self)
+        
+        # Créer un fichier HDF5
+        with h5py.File(output_path, 'w') as f:
+            # Préallocation des datasets
+            images = f.create_dataset('images', shape=(total_len, *self.base_dataset[0][0].shape), dtype='f')
+            masks = f.create_dataset('masks', shape=(total_len, *self.base_dataset[0][1].shape), dtype='f')
+            labels = f.create_dataset('labels', shape=(total_len,), dtype='f')
+
+            # Sauvegarde des données originales
+            for idx in range(base_len):
+                print(idx)
+                img, mask, label = self.base_dataset[idx]
+                images[idx] = img
+                masks[idx] = mask
+                labels[idx] = label
+
+            # Sauvegarde des données augmentées (Mixup)
+            for aug_idx in range(len(self.augmented_indices)):
+                print(aug_idx)
+                idx1, idx2 = self.augmented_indices[aug_idx]
+                img1, mask1, label1 = self.base_dataset[idx1]
+                img2, _, label2 = self.base_dataset[idx2]
+                lam = np.random.choice(self.lam_values.numpy())
+                mixed_image = lam * img1 + (1 - lam) * img2
+                mixed_label = lam * label1 + (1 - lam) * label2
+
+                images[base_len + aug_idx] = mixed_image
+                masks[base_len + aug_idx] = mask1
+                labels[base_len + aug_idx] = mixed_label
+
+        print(f"Dataset Mixup sauvegardé dans {output_path}")
 
 class TestHippocampusDataset3D(Dataset):
     def __init__(self, data_dir, csv_path, transform=None):
@@ -240,3 +281,26 @@ class TestHippocampusDataset3D(Dataset):
             image_tensor = self.transform(image_tensor)
 
         return image_tensor, label_tensor
+
+class HDF5Dataset(Dataset):
+    def __init__(self, h5_file_path):
+        """
+        Initialise le dataset à partir d'un fichier HDF5.
+        :param h5_file_path: Chemin vers le fichier .h5.
+        """
+        self.h5_file_path = h5_file_path
+
+        # Ouvrir le fichier une première fois pour obtenir la longueur des données
+        with h5py.File(self.h5_file_path, 'r') as f:
+            self.data_len = len(f['images'])  # Longueur des données (nombre d'images)
+        
+    def __len__(self):
+        return self.data_len
+
+    def __getitem__(self, idx):
+        # Ouvrir le fichier au moment de l'accès pour éviter de le garder ouvert
+        with h5py.File(self.h5_file_path, 'r') as f:
+            image = torch.tensor(f['images'][idx], dtype=torch.float32)
+            label = torch.tensor(f['labels'][idx], dtype=torch.float32).unsqueeze(0)
+        
+        return image, label
